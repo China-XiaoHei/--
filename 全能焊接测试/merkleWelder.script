@@ -1,0 +1,392 @@
+# 定义一个名为 OHTest 的函数，这很可能是整个任务的主函数。
+def OHTest():
+  # --- 预设脚本 (Preamble Script) ---
+  # 这部分代码在主任务开始前运行，用于配置系统和初始化变量。
+
+  # 测试预设脚本 (Test Preamble Script) - 目前为空。
+  # set_safety_mode_transition_hardness(1) # 设置从自由模式切换到安全模式时的“硬度”，可能是关于如何处理运动过渡的。
+
+  # --- 配置预设脚本 (Configuration Preamble Script) ---
+  # 配置变量和硬件接口。
+
+  set_tool_analog_io_work_mode(3) # 设置工具端模拟IO的工作模式。
+  set_tool_digital_io_work_mode(0) # 设置工具端数字IO的工作模式。
+  set_tool_analog_input_domain(0)  # 设置工具端模拟输入的电压范围 (0-10V)。
+  set_tool_analog_output_domain(0) # 设置工具端模拟输出的电压范围 (0-10V)。
+
+  # 配置工具端数字IO引脚 (引脚0-3)。
+  # 参数: (引脚号, 模式, 输入反向, 输出反向)
+  set_tool_digital_io_config(0,0,False,False)
+  set_tool_digital_io_config(1,0,False,False)
+  set_tool_digital_io_config(2,0,False,False)
+  set_tool_digital_io_config(3,0,False,False)
+
+  # 配置工具串口 (禁用, 115200波特率, ...) modbus_rtu 和 usage 可能与特定插件有关。
+  tool_serial_config(False, 115200, 0, 1, modbus_rtu = False, usage = 0)
+
+  set_tool_voltage(0) # 设置工具电压 (例如，用于焊枪)。
+
+  # 设置工具中心点 (TCP)。
+  # 参数: [X, Y, Z, Rx, Ry, Rz] (位置和姿态偏移)。
+  set_tcp([-0.002763540506576863, -0.001999147779578898, 0.3823892040553604, 0.0, 0.0, 0.0])
+
+  # 设置负载参数 (重量, 重心, 惯性张量)。
+  set_payload(2.3, [0.0, -0.1, 0.2], [0.006169, 0.006169, 0.006169, 0.0, 0.0, 0.0])
+
+  # 设置标准IO板 (基座) 的模拟输入/输出电压范围。
+  set_standard_analog_input_domain(0, 1) # 输入通道0，4-20mA模式
+  set_standard_analog_input_domain(1, 1) # 输入通道1，4-20mA模式
+  set_standard_analog_output_domain(0, 0) # 输出通道0，0-10V模式
+  set_standard_analog_output_domain(1, 0) # 输出通道1，0-10V模式
+
+  set_input_actions_to_default() # 将所有输入动作重置为默认值。
+  set_standard_digital_input_action(0, "default") # 数字输入0：默认行为。
+  set_standard_digital_input_action(1, "stoptask") # 数字输入1：停止任务（可能是急停或安全门）。
+
+  set_gravity([0.0, 0.0, 9.82]) # 设置重力方向，用于动力学计算。
+
+  # --- 帧变量 (Frame variables) ---
+  # 定义全局坐标系（或世界坐标系）中的位置和姿态。
+  global Schweisstisch # 焊接台
+  Schweisstisch = [0.29075047679810756, -0.4663743041215405, 0.0187218628462002, -0.002665786436030141, -0.005868503089167005, 0.025742657636423145] # 焊接台的 [X, Y, Z, Rx, Ry, Rz]
+  global Test # 一个测试坐标系
+  Test = [0.0, 0.0, 0.0, 3.141592653589793, 0.0, 0.0] # [X, Y, Z, Rx, Ry, Rz]，其中 Rx 为 pi (180度)
+
+  # --- 临时帧变量和配置 (Temporary frame variables & Conveyor Config) ---
+  # 定义焊接过程的控制变量。
+  global weldActive # 焊接激活标志
+  weldActive = True # 设置为 True 以启用焊接功能
+
+  # 功率源参数 (Powersource Number:2)
+  # 这些可能是用于动态修改焊接参数的变量，但在此脚本中初始化为0。
+  # wCPara0 到 wCPara20
+  for i in range(21):
+      globals()[f'wCPara{i}'] = 0
+
+  # --- Modbus 信号配置 (Modbus Signal Configuration) ---
+  # 配置与焊接电源（通过 Modbus TCP/IP）的通信。
+  # IP 地址: 169.254.194.15, 端口: 255
+  # 格式: modbus_add_signal(IP, 端口, 寄存器地址, 数据类型(0:Coil,1:Reg,2:InputReg,3:DiscreteInput), 信号名, 启用)
+
+  # 信号: 电弧存在 (Arc Present)
+  modbus_add_signal("169.254.194.15", 255, 7, 0, "LichtbogenVor", True)
+  modbus_set_signal_update_frequency("LichtbogenVor", 200) # 设置200Hz更新频率
+
+  # 信号: 焊接准备就绪
+  modbus_add_signal("169.254.194.15", 255, 2, 0, "SchweissBereit", True)
+  modbus_set_signal_update_frequency("SchweissBereit", 200)
+
+  # 信号: 触摸 (Touch) - 可能指接触传感或碰焊枪
+  modbus_add_signal("169.254.194.15", 255, 3, 0, "Touch", True)
+  modbus_set_signal_update_frequency("Touch", 200)
+
+  # 信号: 过程激活 (Process Active)
+  modbus_add_signal("169.254.194.15", 255, 5, 0, "ProzessAktiv", True)
+  modbus_set_signal_update_frequency("ProzessAktiv", 200)
+
+  # 信号: 焊接状态 (输入寄存器)
+  modbus_add_signal("169.254.194.15", 255, 0, 2, "SchweissStatus", True)
+  modbus_set_signal_update_frequency("SchweissStatus", 200)
+
+  # --- 控制输出信号 (Control Outputs to Power Source) ---
+  # 这些是机器人发送给焊接电源的命令。
+  modbus_add_signal("169.254.194.15", 255, 16423, 1, "SchweissenEin", True) # 焊接开启
+  modbus_add_signal("169.254.194.15", 255, 16430, 1, "Freigabe", True)       # 释放/使能
+  modbus_add_signal("169.254.194.15", 255, 16421, 1, "Programm1", True)      # 程序/参数组选择位
+  modbus_add_signal("169.254.194.15", 255, 16426, 1, "Programm2", True)
+  modbus_add_signal("169.254.194.15", 255, 16425, 1, "Programm4", True)
+  modbus_add_signal("169.254.194.15", 255, 16424, 1, "Programm8", True)
+  modbus_add_signal("169.254.194.15", 255, 16420, 1, "Interpulse", True)      # 脉冲间
+  modbus_add_signal("169.254.194.15", 255, 16431, 1, "WeldSim", True)        # 焊接模拟 (测试模式)
+  modbus_add_signal("169.254.194.15", 255, 16418, 1, "GasTest", True)        # 气体测试
+  modbus_add_signal("169.254.194.15", 255, 16422, 1, "DrahtVor", True)       # 送丝 (向前)
+  modbus_add_signal("169.254.194.15", 255, 16417, 1, "DrahtRueck", True)     # 退丝 (向后)
+  modbus_add_signal("169.254.194.15", 255, 16429, 1, "Reset", True)          # 复位
+  modbus_add_signal("169.254.194.15", 255, 1027, 3, "Job", True)             # Job/任务选择 (可能是离散输入)
+
+  # --- 全局状态变量 (Global State Variables) ---
+  global WeldThrd      # 焊接失败监控线程的句柄
+  global targetStatusLB # 目标电弧状态 (True=期望有电弧)
+  global MsgPowersource # 来自功率源的消息/状态文本
+  WeldThrd = 0         # 初始化线程句柄
+  targetStatusLB = False # 初始化期望电弧状态为 False
+  MsgPowersource = ""  # 初始化消息为空
+
+  # --- 子函数定义 (Sub-function Definitions) ---
+  # 定义用于控制焊接过程的函数。
+
+  # 函数: weldOn (开启焊接)
+  def weldOn(wCPara0, wCPara1, ...):
+      # wCPara0 在这里被用作持续时间 (duration)。
+      timerSon = wCPara0 / 1000 # 将毫秒转换为秒
+      # 使用全局状态变量
+      global MsgPowersource, targetStatusLB, WeldThrd
+
+      # 1. 准备命令
+      modbus_set_output_signal("Freigabe", True, False) # 发送释放信号
+      modbus_set_runstate_dependent_choice("SchweissenEin", 1) # 设置依赖项
+      modbus_set_output_signal("Reset", True, False) # 发送复位信号以清除任何错误
+      sleep(0.2)
+      modbus_set_output_signal("Reset", False, False)
+      modbus_set_runstate_dependent_choice("Job", 1) # 设置 Job 模式
+      modbus_set_runstate_dependent_choice("Programm1", 2) # 选择程序
+      sync() # 等待所有命令发送完毕
+
+      # 2. 检查是否真的准备就绪，如果不是，尝试复位
+      if modbus_get_signal_status("SchweissBereit", False) == False:
+          modbus_set_output_signal("Reset", True, False)
+          sleep(0.6)
+          modbus_set_output_signal("Reset", False, False)
+          sleep(0.6)
+      # end (这是 URScript 的旧语法，现在通常用冒号和缩进)
+
+      # 3. 如果焊接功能是激活的，执行焊接开启
+      if weldActive == True:
+          modbus_set_output_signal("SchweissenEin", True, False) # 发送焊接开启命令
+          MsgPowersource = "warte Brenner Ein" # 更新状态消息: "等待焊枪开启"
+          # 4. 循环等待，直到检测到电弧存在
+          while modbus_get_signal_status("LichtbogenVor", False) == False:
+              sync() # 同步
+              sleep(0.01) # 短暂延迟
+              modbus_set_output_signal("SchweissenEin", True, False) # 持续发送命令
+          # end
+          MsgPowersource = "Brenner ist Ein" # 更新状态: "焊枪已开启"
+          targetStatusLB = True # 标记期望电弧状态为 True
+          # 5. 启动一个后台线程来监控焊接失败 (例如，电弧意外熄灭)
+          WeldThrd = start_thread(WeldFailure, ())
+          sleep(timerSon) # 等待指定的焊接持续时间
+      # end
+  # end
+
+  # 函数: weldOff (关闭焊接)
+  def weldOff(wCPara0, ...):
+      timerSoff = wCPara0 / 1000
+      global MsgPowersource, targetStatusLB, WeldThrd, weldActive
+      sync()
+      targetStatusLB = False # 更新期望电弧状态为 False
+
+      # 1. 如果焊接是激活的，停止失败监控线程
+      if weldActive == True:
+          stop_thread(WeldThrd)
+      # end
+
+      # 2. 发送焊接关闭命令
+      modbus_set_output_signal("SchweissenEin", False, False)
+
+      # 3. 循环等待，直到检测到电弧已熄灭
+      while modbus_get_signal_status("LichtbogenVor", False) == True:
+          sync()
+          sleep(0.01)
+      # end
+
+      sleep(timerSoff) # 等待指定的关闭后时间
+      targetStatusLB = False # 再次确认
+      MsgPowersource = "Brenner ist aus" # 更新状态: "焊枪已关闭"
+  # end
+
+  # 函数: wireFor (送丝)
+  def wireFor(wCPara0, ...):
+      timeS = wCPara0 # 毫秒
+      global MsgPowersource
+      MsgPowersource = "Starte Draht vor" # "开始送丝"
+      modbus_set_runstate_dependent_choice("DrahtVor", 0) # 设置依赖项
+      modbus_set_output_signal("DrahtVor", True, False) # 发送送丝命令
+      sleep(timeS / 1000) # 等待指定时间
+      modbus_set_output_signal("DrahtVor", True, False) # (代码似乎有误，应该是False来停止？)
+      modbus_set_runstate_dependent_choice("DrahtVor", 1) # 设置依赖项
+      MsgPowersource = "Draht vor Ende" # "送丝结束"
+  # end
+
+  # 函数: weldSetJob (设置焊接程序/参数)
+  def weldSetJob(wCPara0, ...):
+      job = wCPara0 # 期望的 Job 编号 (0-255)
+      modbus_set_output_signal("Programm1", True, False) # 可能是激活程序选择模式
+
+      # 这部分代码非常奇怪。它将整数 job 转换为16位二进制列表，
+      # 然后以一种颠倒字节序 (endianness) 的方式重新组合。
+      # [7,6,5,4,3,2,1,0,15,14,13,12,11,10,9,8] -> [8,9,10,11,12,13,14,15,0,1,2,3,4,5,6,7]
+      # 这可能是在匹配特定硬件对位/字节顺序的要求。
+      tmpBinJob = integer_to_binary_list(job)
+      jobSwitch = binary_list_to_integer([tmpBinJob[7],tmpBinJob[6],tmpBinJob[5],tmpBinJob[4],tmpBinJob[3],tmpBinJob[2],tmpBinJob[1],tmpBinJob[0],tmpBinJob[15],tmpBinJob[14],tmpBinJob[13],tmpBinJob[12],tmpBinJob[11],tmpBinJob[10],tmpBinJob[9],tmpBinJob[8]])
+      # 将转换后的值写入 "Job" 寄存器
+      modbus_set_output_register("Job", jobSwitch, False)
+  # end
+
+  # 函数: weldSpotWeld (点焊)
+  def weldSpotWeld(wCPara0, wCPara1, ...):
+      # wCPara0: 焊接时间 (On), wCPara1: 休息时间 (Off)
+      timeSOn = wCPara0 / 1000
+      timeSOff = wCPara1 / 1000
+      sync()
+      # 准备阶段 (与 weldOn 类似)
+      modbus_set_output_signal("Freigabe", True, False)
+      modbus_set_runstate_dependent_choice("SchweissenEin", 1)
+      if modbus_get_signal_status("SchweissBereit", False) == False:
+          modbus_set_output_signal("Reset", True, False)
+          sleep(0.6)
+          modbus_set_output_signal("Reset", False, False)
+          sleep(0.6)
+      # end
+      if weldActive == True:
+          # 开始焊接
+          modbus_set_output_signal("SchweissenEin", True, False)
+          while modbus_get_signal_status("LichtbogenVor", False) == False:
+              sync()
+          # end
+          sleep(timeSOn) # 焊接持续时间
+          # 停止焊接
+          modbus_set_output_signal("SchweissenEin", False, False)
+          while modbus_get_signal_status("LichtbogenVor", False) == True:
+              sync()
+          # end
+          sleep(timeSOff) # 休息时间
+      # end
+  # end
+
+  # --- 后台线程 (Background Threads) ---
+
+  # 变量处理线程
+  # 这个线程持续监控焊接电源的原始状态字。
+  global SchweissStatus
+  SchweissStatus = 0
+  def varHandling():
+      global SchweissStatus
+      while True:
+          sync()
+          # 获取 "SchweissStatus" (输入寄存器) 的原始整数值
+          BitStatus = integer_to_binary_list(modbus_get_signal_status("SchweissStatus", False))
+          # 检查高位是否有错误位 (位11-15)，如果任何位被设置，则将 SchweissStatus 重置为0 (表示无错误/正常)
+          # 这种逻辑很奇怪，可能是为了过滤掉特定类型的错误或只关注低位状态。
+          if BitStatus[15] or BitStatus[14] or BitStatus[13] or BitStatus[12] or BitStatus[11]:
+              SchweissStatus = 0
+          # end
+      # end
+  # end
+  # 启动这个线程
+  varHandlingthrd = start_thread(varHandling, ())
+
+  # 焊接失败监控线程 (WeldFailure)
+  # 这个线程在焊接开启时由 weldOn 启动，用于监控焊接过程。
+  def WeldFailure():
+      global SchweissStatus, targetStatusLB
+      while True:
+          sync()
+          # 1. 检查是否有来自电源的错误状态
+          if SchweissStatus != 0:
+              sleep(0.1) # 短暂延迟以确认
+              if SchweissStatus != 0:
+                  if SchweissStatus == 3: # 假设状态3是特定错误
+                      popup("Schweißmaschine meldet Fehler 3", title="Schweißquelle Fehler", blocking=True)
+                      halt # 停止机器人程序
+                  # end
+              # end
+          # end
+          # 2. 检查电弧是否意外熄灭
+          if targetStatusLB == True: # 如果我们期望有电弧
+              sync()
+              if modbus_get_signal_status("LichtbogenVor", False) == False and targetStatusLB == True:
+                  # 电弧丢失，开始计时
+                  global igniteTimer
+                  igniteTimer = 0
+                  # 等待最多5秒，看电弧是否能恢复
+                  while modbus_get_signal_status("LichtbogenVor", False) == False and igniteTimer < 5:
+                      sync()
+                      sleep(0.5)
+                      igniteTimer = igniteTimer + 1
+                  # end
+                  # 如果5秒后电弧仍未恢复
+                  targetStatusLB = True # (此行似乎是多余的)
+                  sleep(0.5)
+                  if modbus_get_signal_status("LichtbogenVor", False) == False and targetStatusLB == True:
+                      popup("Verlorener Lichtbogen", title="Schweißquelle Fehler", blocking=True)
+                      halt # 停止机器人程序
+                  # end
+              # end
+          # end
+      # end
+  # end
+
+  # --- 路径点变量 (Waypoint Variables) ---
+  # 定义机器人移动的目标位置。
+  global Wegpunkt_5_p, Wegpunkt_5_q
+  Wegpunkt_5_p = [0.8119176562492219, 0.24988074811753433, 0.08215150255833964, -2.3402679074530184, -0.008624527944548646, -1.5038161825050655] # 位置
+  Wegpunkt_5_q = [3.24558218314431, -1.4633765403154007, 1.9934031037079347, 0.23992337026784205, 1.6033754463604015, 3.1611574056936775] # 关节角度
+  # ... (其他路径点定义类似)
+  global Wegpunkt_4_p, Wegpunkt_4_q
+  Wegpunkt_4_p = [0.8116210846834591, 0.0703229268467715, -0.029567283660949406, -2.3468617282902158, -0.11658730224208583, -1.3986390519367475]
+  Wegpunkt_4_q = [2.8447965294464184, -1.411129351885994, 2.1831265236884136, 0.029663036865456016, 1.3182582005472931, 2.726326335059125]
+  global Wegpunkt_3_p, Wegpunkt_3_q
+  Wegpunkt_3_p = [0.8176532353206708, 0.07836713335464511, -0.06828485325115402, -2.346884578949513, -0.11668127528259392, -1.3981351596756257]
+  Wegpunkt_3_q = [2.86659511483548, -1.3456840125014236, 2.1956575549914716, -0.05213847151700102, 1.3331680212922077, 2.74200297744322]
+  global Wegpunkt_2_p, Wegpunkt_2_q
+  Wegpunkt_2_p = [0.8116412162686645, 0.25005338885240186, -0.06825898134184084, -2.346843507396253, -0.11659688643508027, -1.3986445312615963]
+  Wegpunkt_2_q = [3.245541615057358, -1.290574520159268, 2.1123487346522176, -0.05185226344040528, 1.6033754463604015, 3.010579556490058]
+  global Wegpunkt_1_p, Wegpunkt_1_q
+  Wegpunkt_1_p = [0.8119316760536035, 0.2498822113084314, -0.05845674805353632, -2.3402721890968494, -0.008624686471966861, -1.5038161455780272]
+  Wegpunkt_1_q = [3.24558218314431, -1.30365544187916, 2.106804429435397, -0.03319473693780495, 1.6033754463604015, 3.1611574056936775]
+  global Wegpunkt_p, Wegpunkt_q
+  Wegpunkt_p = [0.8119176562492219, 0.24988074811753433, 0.08215150255833964, -2.3402679074530184, -0.008624527944548646, -1.5038161825050655]
+  Wegpunkt_q = [3.24558218314431, -1.4633765403154007, 1.9934031037079347, 0.23992337026784205, 1.6033754463604015, 3.1611574056936775]
+
+  # --- 主任务脚本 (Main Task Script) ---
+  # 这是机器人执行的核心逻辑流程。
+
+  $ LINE: (2, "Roboter Hauptaufgabe") # 来自编辑器的行号标记，用于调试。
+
+  # --- 开始: ELITECO 焊接控制插件任务节点 ---
+  # Task:4 - 设置焊接 Job
+  global WeldThrd, LichtbogenVor, SchweissBereit, Festbrand, targetStatusLB, MsgPowersource, weldActive
+
+  sync() # 确保所有之前的命令都已完成
+  # 调用 weldSetJob 函数，设置 Job 编号为 7
+  weldSetJob(7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+  # --- 结束: ELITECO 焊接控制插件任务节点 ---
+
+  # --- 移动机器人到初始位置 ---
+  $ LINE: (4, "MoveJ") # 关节插补运动
+  $ LINE: (5, "Wegpunkt", "after") # 到达路径点 "Wegpunkt"
+  # 使用逆运动学 (get_inverse_kin) 将笛卡尔坐标转换为关节角度并移动
+  movej(get_inverse_kin(Wegpunkt_p, qnear=Wegpunkt_q), a=1.396, v=1.047)
+
+  $ LINE: (6, "Wegpunkt_1", "after") # 到达路径点 "Wegpunkt_1"
+  movej(get_inverse_kin(Wegpunkt_1_p, qnear=Wegpunkt_1_q), a=1.396, v=1.047)
+
+  $ LINE: (7, "Wegpunkt_2", "after") # 到达路径点 "Wegpunkt_2"
+  movej(get_inverse_kin(Wegpunkt_2_p, qnear=Wegpunkt_2_q), a=1.396, v=1.047)
+
+  # --- 开始: ELITECO 焊接控制插件任务节点 ---
+  # Task:1 - 开启焊接
+  global WeldThrd, LichtbogenVor, SchweissBereit, Festbrand, targetStatusLB, MsgPowersource, weldActive
+
+  sync() # 确保机器人已到达位置
+  if weldActive == True:
+      # 调用 weldOn 函数，参数 wCPara0=50 (持续50毫秒)
+      weldOn(50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+  # end
+  # --- 结束: ELITECO 焊接控制插件任务节点 ---
+
+  # --- 沿路径移动并焊接 ---
+  $ LINE: (9, "MoveP") # 笛卡尔路径插补运动
+  $ LINE: (10, "Wegpunkt_3", "after") # 到达路径点 "Wegpunkt_3"
+  movep(Wegpunkt_3_p, a=0.1, v=0.007, r=0.0) # 以较低的速度和加速度移动，可能是在焊接中
+
+  # --- 开始: ELITECO 焊接控制插件任务节点 ---
+  # Task:2 - 关闭焊接
+  global WeldThrd, LichtbogenVor, SchweissBereit, Festbrand, targetStatusLB, MsgPowersource, weldActive
+  global weldActive
+
+  sync() # 确保机器人已到达焊接终点
+  # 调用 weldOff 函数，参数 wCPara0=50 (关闭后等待50毫秒)
+  weldOff(50,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+  # --- 结束: ELITECO 焊接控制插件任务节点 ---
+
+  # --- 移动机器人返回安全位置 ---
+  $ LINE: (12, "MoveJ") # 关节插补运动
+  $ LINE: (13, "Wegpunkt_4", "after") # 到达路径点 "Wegpunkt_4"
+  movej(get_inverse_kin(Wegpunkt_4_p, qnear=Wegpunkt_4_q), a=1.396, v=1.047)
+
+  $ LINE: (14, "Wegpunkt_5", "after") # 到达路径点 "Wegpunkt_5"
+  movej(get_inverse_kin(Wegpunkt_5_p, qnear=Wegpunkt_5_q), a=1.396, v=1.047)
+
+# 函数定义结束
+end

@@ -1,0 +1,624 @@
+def test1():
+  # Preamble Script.
+  # Test Preamble Script To Be Added In The Future.
+  set_safety_mode_transition_hardness(1)
+  # Configuration Preamble Script.
+  # Configuration variables.
+  set_tool_analog_io_work_mode(3)
+  set_tool_digital_io_work_mode(0)
+  set_tool_analog_input_domain(0)
+  set_tool_analog_output_domain(0)
+  set_tool_digital_io_config(0,0,False,False)
+  set_tool_digital_io_config(1,0,False,False)
+  set_tool_digital_io_config(2,0,False,False)
+  set_tool_digital_io_config(3,0,False,False)
+  tool_serial_config(False,115200,0,1,modbus_rtu = False,usage = 0)
+  set_tool_voltage(0)
+  set_tcp([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  set_payload(0.0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  set_standard_analog_input_domain(0, 1)
+  set_standard_analog_input_domain(1, 1)
+  set_standard_analog_output_domain(0, 1)
+  set_standard_analog_output_domain(1, 1)
+  set_input_actions_to_default()
+  set_gravity([0.0, 0.0, 9.82])
+  # Frame variables.
+  global u22352u26631u31995
+  u22352u26631u31995 = [0.005, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # Temporary frame variables.
+  # Conveyor Config
+  #--------------- Start WeldingDevice -----------------
+  def touchSenseOffset(org,dir1,dir2,length):
+     pose = elicopy.deepcopy(org)
+     pose_diff = [0,0,0]
+     pose_diff[0] = dir2[0] - dir1[0]
+     pose_diff[1] = dir2[1] - dir1[1]
+     pose_diff[2] = dir2[2] - dir1[2]
+     pose_diff = normalize(pose_diff)
+     pose[0] = pose[0] + pose_diff[0] * length
+     pose[1] = pose[1] + pose_diff[1] * length
+     pose[2] = pose[2] + pose_diff[2] * length
+     return pose
+  end
+  global fullTouchSenseOffsetValue
+  fullTouchSenseOffsetValue = [0,0,0,0,0,0]
+  global fullTouchReferencePoint
+  fullTouchReferencePoint = [0,0,0,0,0,0]
+  global inWeldingPath
+  inWeldingPath = False
+  global full_sim_mode
+  full_sim_mode = True
+  global full_sim_mode_inspection_thread_id
+  full_sim_mode_inspection_thread_id = 0
+  global full_process
+  full_process = 0
+  global full_recordCurrent
+  full_recordCurrent = 0
+  global full_recordVoltage
+  full_recordVoltage = 0
+  def pose_trans_local(world_pnt,frame):
+    return pose_trans(pose_inv(frame),world_pnt)
+  end
+  def pose_trans_world(local_pnt,frame):
+    return pose_trans(frame,local_pnt)
+  end
+  def two_point_get_vec(vec1,vec2):
+    result=[0,0,0]
+    result[0]=vec2[0]-vec1[0]
+    result[1]=vec2[1]-vec1[1]
+    result[2]=vec2[2]-vec1[2]
+    return result
+  end
+  def vector_o_product(vec1,vec2):
+    return vec1[0]*vec2[0]+vec1[1]*vec2[1]+vec1[2]*vec2[2]
+  end
+  def vector_v_product(vec1,vec2):
+    res_vec=[0,0,0]
+    res_vec[0]=vec1[1]*vec2[2]-vec1[2]*vec2[1]
+    res_vec[1]=vec1[2]*vec2[0]-vec1[0]*vec2[2]
+    res_vec[2]=vec1[0]*vec2[1]-vec1[1]*vec2[0]
+    return res_vec
+  end
+  def get_vertical_vec_by_three_point(pnt1,pnt2,vec_pnt):
+    vec1=[0,0,0]
+    vec1[0]=pnt2[0]-pnt1[0]
+    vec1[1]=pnt2[1]-pnt1[1]
+    vec1[2]=pnt2[2]-pnt1[2]
+    vec1=normalize(vec1)
+    vec2=[0,0,0]
+    vec2[0]=vec_pnt[0]-((pnt1[0]+pnt2[0])/2.0)
+    vec2[1]=vec_pnt[1]-((pnt1[1]+pnt2[1])/2.0)
+    vec2[2]=vec_pnt[2]-((pnt1[2]+pnt2[2])/2.0)
+    vec2=normalize(vec2)
+    ver_vec=vector_v_product(vec1,vec2)
+    return ver_vec
+  end
+  def two_point_touch_offset(pnt1,pnt2,vec_pnt,touch1,touch2,frame):
+    final_change=[0,0,0,0,0,0]
+    pnt1_local=pose_trans_local(pnt1,frame)
+    pnt2_local=pose_trans_local(pnt2,frame)
+    vec_pnt_local=pose_trans_local(vec_pnt,frame)
+    touch1_local=pose_trans_local(touch1,frame)
+    touch2_local=pose_trans_local(touch2,frame)
+    ver_vec=get_vertical_vec_by_three_point(pnt1_local,pnt2_local,vec_pnt_local)
+    if abs(norm(ver_vec))<0.0001:
+      return final_change
+    end
+    if (abs(ver_vec[0])>abs(ver_vec[1]))&(abs(ver_vec[0])>abs(ver_vec[2])):
+      pnt1_local[0]=0
+      pnt2_local[0]=0
+      touch1_local[0]=0
+      touch2_local[0]=0
+    elif (abs(ver_vec[1])>abs(ver_vec[0]))&(abs(ver_vec[1])>abs(ver_vec[2])):
+      pnt1_local[1]=0
+      pnt2_local[1]=0
+      touch1_local[1]=0
+      touch2_local[1]=0
+    elif (abs(ver_vec[2])>abs(ver_vec[0]))&(abs(ver_vec[2])>abs(ver_vec[1])):
+      pnt1_local[2]=0
+      pnt2_local[2]=0
+      touch1_local[2]=0
+      touch2_local[2]=0
+    else:
+      return final_change
+    end
+    final_change[0]=touch1_local[0]-pnt1_local[0]
+    final_change[1]=touch1_local[1]-pnt1_local[1]
+    final_change[2]=touch1_local[2]-pnt1_local[2]
+    new_vec1=two_point_get_vec(pnt1_local,pnt2_local)
+    new_vec1=normalize(new_vec1)
+    if abs(norm(new_vec1))<0.0001:
+      return final_change
+    end
+    new_vec2=two_point_get_vec(touch1_local,touch2_local)
+    new_vec2=normalize(new_vec2)
+    if abs(norm(new_vec2))<0.0001:
+      return final_change
+    end
+    angle=vector_o_product(new_vec1,new_vec2)/(norm(new_vec1)*norm(new_vec2))
+    if angle>1.0:
+      angle=1.0
+    end
+    if angle<-1.0:
+      angle=-1.0
+    end
+    angle=acos(angle)
+    if abs(angle)<0.0001:
+      return final_change
+    end
+    judge_vec=vector_v_product(new_vec1,new_vec2)
+    if abs(norm(judge_vec))<0.0001:
+      return final_change
+    end
+    judge_vec=normalize(judge_vec)
+    if abs(judge_vec[0])>0.9999:
+      if judge_vec[0]>0:
+        final_change[3]=angle
+      else:
+        final_change[3]=-angle
+      end
+      return final_change
+    end
+    if abs(judge_vec[1])>0.9999:
+      if judge_vec[1]>0:
+        final_change[4]=angle
+      else:
+        final_change[4]=-angle
+      end
+      return final_change
+    end
+    if abs(judge_vec[2])>0.9999:
+      if judge_vec[2]>0:
+        final_change[5]=angle
+      else:
+        final_change[5]=-angle
+      end
+      return final_change
+    end
+    return final_change
+  end
+  def last_point_touch_offset(pnt1,pnt2,vec_pnt,touch1,touch2,pnt3,touch3,frame):
+    final_change=[0,0,0,0,0,0]
+    pnt3_local=pose_trans_local(pnt3,frame)
+    touch3_local=pose_trans_local(touch3,frame)
+    touch1_local=pose_trans_local(touch1,frame)
+    touch2_local=pose_trans_local(touch2,frame)
+    pnt1_local=pose_trans_local(pnt1,frame)
+    pnt2_local=pose_trans_local(pnt2,frame)
+    vec_pnt_local=pose_trans_local(vec_pnt,frame)
+    ver_vec=get_vertical_vec_by_three_point(pnt1_local,pnt2_local,vec_pnt_local)
+    if abs(norm(ver_vec))<0.0001:
+      return final_change
+    end
+    if (abs(ver_vec[0])>abs(ver_vec[1]))&(abs(ver_vec[0])>abs(ver_vec[2])):
+      pnt3_local[0]=0
+      touch3_local[0]=0
+      touch1_local[0]=0
+      touch2_local[0]=0
+    elif (abs(ver_vec[1])>abs(ver_vec[0]))&(abs(ver_vec[1])>abs(ver_vec[2])):
+      pnt3_local[1]=0
+      touch3_local[1]=0
+      touch1_local[1]=0
+      touch2_local[1]=0
+    elif (abs(ver_vec[2])>abs(ver_vec[0]))&(abs(ver_vec[2])>abs(ver_vec[1])):
+      pnt3_local[2]=0
+      touch3_local[2]=0
+      touch1_local[2]=0
+      touch2_local[2]=0
+    else:
+      return final_change
+    end
+    new_vec3=two_point_get_vec(pnt3_local,touch3_local)
+    if abs(norm(new_vec3))<0.0001:
+      return final_change
+    end
+    new_vec2=two_point_get_vec(touch1_local,touch2_local)
+    if abs(norm(new_vec2))<0.0001:
+      return final_change
+    end
+    new_vec2=normalize(new_vec2)
+    value=vector_o_product(new_vec2,new_vec3)
+    final_change[0]=new_vec2[0]*value
+    final_change[1]=new_vec2[1]*value
+    final_change[2]=new_vec2[2]*value
+    return final_change
+  end
+  def cal_new_orientation_point(pnt1,pnt2,pnt3,inner_pnt,vec_pnt):
+    new_vec_pnt=elicopy.deepcopy(vec_pnt)
+    first_vec=two_point_get_vec(pnt1,pnt2)
+    first_vec=normalize(first_vec)
+    if abs(norm(first_vec))<0.0001:
+        return new_vec_pnt
+    end
+    second_vec=two_point_get_vec(pnt1,pnt3)
+    second_vec=normalize(second_vec)
+    if abs(norm(second_vec))<0.0001:
+        return new_vec_pnt
+    end
+    vec_dir=vector_v_product(first_vec,second_vec)
+    vec_dir=normalize(vec_dir)
+    if abs(norm(vec_dir))<0.0001:
+     return new_vec_pnt
+    end
+    len=vector_o_product(vec_dir,two_point_get_vec(inner_pnt,vec_pnt))
+    new_vec_pnt[0]=inner_pnt[0]+vec_dir[0]*len
+    new_vec_pnt[1]=inner_pnt[1]+vec_dir[1]*len
+    new_vec_pnt[2]=inner_pnt[2]+vec_dir[2]*len
+    return new_vec_pnt
+  end
+  modbus_add_signal("192.168.11.3", 255, 2000, 3, "AOTAI2000")
+  modbus_set_signal_update_frequency("AOTAI2000", 10)
+  modbus_add_signal("192.168.11.3", 255, 2001, 3, "AOTAI2001")
+  modbus_set_signal_update_frequency("AOTAI2001", 10)
+  modbus_add_signal("192.168.11.3", 255, 2002, 3, "AOTAI2002")
+  modbus_set_signal_update_frequency("AOTAI2002", 10)
+  modbus_add_signal("192.168.11.3", 255, 2003, 3, "AOTAI2003")
+  modbus_set_signal_update_frequency("AOTAI2003", 10)
+  modbus_add_signal("192.168.11.3", 255, 2004, 3, "AOTAI2004")
+  modbus_set_signal_update_frequency("AOTAI2004", 10)
+  modbus_add_signal("192.168.11.3", 255, 2005, 3, "AOTAI2005")
+  modbus_set_signal_update_frequency("AOTAI2005", 10)
+  modbus_add_signal("192.168.11.3", 255, 2006, 3, "AOTAI2006")
+  modbus_set_signal_update_frequency("AOTAI2006", 10)
+  modbus_add_signal("192.168.11.3", 255, 2007, 3, "AOTAI2007")
+  modbus_set_signal_update_frequency("AOTAI2007", 10)
+  modbus_add_signal("192.168.11.3", 255, 2008, 3, "AOTAI2008")
+  modbus_set_signal_update_frequency("AOTAI2008", 10)
+  modbus_add_signal("192.168.11.3", 255, 2009, 3, "AOTAI2009")
+  modbus_set_signal_update_frequency("AOTAI2009", 10)
+  modbus_add_signal("192.168.11.3", 255, 1000, 2, "AOTAI1000")
+  modbus_set_signal_update_frequency("AOTAI1000", 10)
+  modbus_add_signal("192.168.11.3", 255, 1001, 2, "AOTAI1001")
+  modbus_set_signal_update_frequency("AOTAI1001", 10)
+  modbus_add_signal("192.168.11.3", 255, 1002, 2, "AOTAI1002")
+  modbus_set_signal_update_frequency("AOTAI1002", 10)
+  modbus_add_signal("192.168.11.3", 255, 1003, 2, "AOTAI1003")
+  modbus_set_signal_update_frequency("AOTAI1003", 10)
+  modbus_add_signal("192.168.11.3", 255, 1004, 2, "AOTAI1004")
+  modbus_set_signal_update_frequency("AOTAI1004", 10)
+  modbus_add_signal("192.168.11.3", 255, 1005, 2, "AOTAI1005")
+  modbus_set_signal_update_frequency("AOTAI1005", 10)
+  modbus_add_signal("192.168.11.3", 255, 1006, 2, "AOTAI1006")
+  modbus_set_signal_update_frequency("AOTAI1006", 10)
+  modbus_add_signal("192.168.11.3", 255, 1007, 2, "AOTAI1007")
+  modbus_set_signal_update_frequency("AOTAI1007", 10)
+  modbus_add_signal("192.168.11.3", 255, 1008, 2, "AOTAI1008")
+  modbus_set_signal_update_frequency("AOTAI1008", 10)
+  modbus_add_signal("192.168.11.3", 255, 1009, 2, "AOTAI1009")
+  modbus_set_signal_update_frequency("AOTAI1009", 10)
+  global aotai_mode
+  def aotai_mode_set(process,arc):
+      global aotai_mode
+      aotai_mode = [False, False, False, False, False, False, False, False, False, False, False, False, False, False, True, arc]
+      if MAGParameters[process].work_type == 1:
+         aotai_mode[13] = False
+         aotai_mode[12] = False
+      elif MAGParameters[process].work_type == 0:
+         aotai_mode[13] = True
+         aotai_mode[12] = False
+      elif MAGParameters[process].work_type == 2:
+         aotai_mode[13] = False
+         aotai_mode[12] = True
+      elif MAGParameters[process].work_type == 3:
+         aotai_mode[13] = True
+         aotai_mode[12] = True
+      modbus_set_output_register("AOTAI2000",binary_list_to_integer(aotai_mode))
+  end
+  def full_arc_set( current, voltage,process):
+      global full_recordCurrent
+      global full_recordVoltage
+      global full_process
+      full_process = process
+      full_recordCurrent = current
+      full_recordVoltage = voltage
+      modbus_set_output_register("AOTAI2002",MAGParameters[process].job_number)
+      modbus_set_output_register("AOTAI2003",MAGParameters[process].expert_number)
+      current = round(current * 65535 / 500)
+      voltage = round(voltage * 65535 / 10 + 32767.5)
+      modbus_set_output_register("AOTAI2004",current)
+      modbus_set_output_register("AOTAI2005",voltage)
+  end
+  def full_alarm_cb():
+     global full_process
+     process = full_process
+     modbus_set_output_register("AOTAI2001",8)
+     sleep(0.02)
+     modbus_set_output_register("AOTAI2001",0)
+     aotai_mode_set(process,False)
+  end
+  global full_arc_alarm_thread_id
+  full_arc_alarm_thread_id = 0
+  def full_alarm_di_check():
+     global full_arc_alarm_thread_id
+     alarm_time = 0
+     sleep_time = 0.1
+     while True:
+        welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+        welding_err = integer_to_binary_list(modbus_get_signal_status("AOTAI1001"))
+        if welding_state[1] != 1 or welding_state[5] != 1:
+           popup(s="错误编号009：焊机与机器人通讯中断或焊机准备未就绪！", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[0] == 1:
+           popup(s="开机异常", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[1] == 1:
+           popup(s="焊枪开关异常", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[2] == 1:
+           popup(s="给定异常", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[3] == 1:
+           popup(s="无电压反馈", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[4] == 1:
+           popup(s="送丝机异常", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[5] == 1:
+           popup(s="送丝机→控制器通信异常", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_err[6] == 1:
+           popup(s="无保护气", error=True,title="焊接报警", blocking=False)
+           halt()
+        if welding_state[0] == 0:
+           alarm_time = alarm_time + sleep_time
+        else:
+           alarm_time = 0
+        if alarm_time >= 5.0 :
+           full_alarm_cb()
+           popup(s="错误编号003：电弧中断!", error=True,title="焊接报警", blocking=False)
+           pause()
+        sleep(sleep_time)
+     end
+  end
+  global full_arc_on_proportion_thread_id
+  full_arc_on_proportion_thread_id = 0
+  def full_arc_on_proportion(target_current,target_voltage,time,miniTime,process):
+      global full_arc_on_proportion_thread_id
+      global full_recordCurrent
+      global full_recordVoltage
+      global time_of_transition_c
+      time_of_transition_c = 0
+      if time <= 0 or miniTime <= 0:
+          full_arc_set(target_current, target_voltage, process)
+          return
+      current = full_recordCurrent
+      sub_current = (target_current - current) / (time * 10)
+      voltage = full_recordVoltage
+      sub_voltage = (target_voltage - voltage) / (time * 10)
+      while time_of_transition_c < miniTime:
+          if time_of_transition_c < time :
+              current = current + sub_current
+              voltage = voltage + sub_voltage
+              full_arc_set(current, voltage, process)
+          time_of_transition_c = time_of_transition_c + 0.1
+          sleep(0.1)
+      end
+      full_arc_set(target_current, target_voltage, process)
+      full_arc_on_proportion_thread_id = 0
+  end
+  def full_arc_on(process):
+      global full_arc_alarm_thread_id
+      global full_arc_on_proportion_thread_id
+      global full_sim_mode
+      global full_sim_mode_inspection_thread_id
+      if full_sim_mode_inspection_thread_id == 0:
+          full_sim_mode_inspection_thread_id = start_thread(full_sim_mode_inspection,())
+      welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+      if welding_state[0] == 1 and full_arc_alarm_thread_id != 0:
+          full_arc_on_proportion_thread_id =  start_thread(full_arc_on_proportion,
+                    (MAGParameters[process].welding_current, MAGParameters[process].welding_voltage,
+                     MAGParameters[process].time_of_transition_c,MAGParameters[process].time_of_transition_c,process))
+          return
+      if full_arc_alarm_thread_id != 0:
+          stop_thread(full_arc_alarm_thread_id)
+          full_arc_alarm_thread_id = 0
+      while welding_state[1] != 1 or welding_state[5] != 1:
+          welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+          full_alarm_cb()
+          popup(s="错误编号001：焊机准备未就绪!", error=True,title="焊接报警", blocking=False)
+          pause()
+      full_arc_set(MAGParameters[process].welding_current * (MAGParameters[process].arc_starting_current / 100.0),MAGParameters[process].arc_starting_voltage, process)
+      if full_sim_mode == False :
+          modbus_set_output_register("AOTAI2001",1)
+          sleep(MAGParameters[process].advance_air_supply_job if MAGParameters[process].work_type == 2 else MAGParameters[process].advance_air_supply)
+          modbus_set_output_register("AOTAI2001",0)
+      arc_on_success_mark = full_sim_mode
+      arc_on_n = 0
+      while arc_on_success_mark == False:
+          if arc_on_n > 2:
+              full_alarm_cb()
+              popup(s="错误编号002：起弧失败!再起弧次数：2", error=True,title="焊接报警", blocking=False)
+              arc_on_n = 0
+              pause()
+          elif arc_on_n != 0:
+              sleep(1)
+              modbus_set_output_register("AOTAI2001",4)
+              sleep(0.001)
+              modbus_set_output_register("AOTAI2001",0)
+              aotai_mode_set(process,True)
+          aotai_mode_set(process,True)
+          full_arc_on_duration_time = 0
+          arc_on_t2 = 0
+          while True:
+              sleep(0.1)
+              arc_on_t2 = arc_on_t2 + 0.1
+              welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+              if welding_state[0] == 1:
+                  full_arc_on_duration_time = full_arc_on_duration_time + 0.1
+              elif welding_state[0] == 0:
+                  full_arc_on_duration_time = 0
+              if full_arc_on_duration_time >= 0.5 :
+                  arc_on_success_mark = True
+                  if full_arc_alarm_thread_id == 0:
+                      full_arc_alarm_thread_id = start_thread(full_alarm_di_check, ())
+                  if full_arc_on_duration_time >= max(MAGParameters[process].arc_start_time if MAGParameters[process].work_type != 2 else MAGParameters[process].arc_start_time_job, 0.5):
+                      break
+              if arc_on_t2 >= 2.0 :
+                  if full_arc_on_duration_time < 0.5:
+                      aotai_mode_set(process,False)
+                      arc_on_success_mark = False
+                      arc_on_n = arc_on_n + 1
+                      break
+                  else:
+                      if full_arc_alarm_thread_id == 0:
+                          full_arc_alarm_thread_id = start_thread(full_alarm_di_check, ())
+                      if full_arc_on_duration_time >= max(MAGParameters[process].arc_start_time if MAGParameters[process].work_type != 2 else MAGParameters[process].arc_start_time_job,0.5):
+                          arc_on_success_mark = True
+                          break
+          end
+      end
+      if arc_on_success_mark:
+          if MAGParameters[process].work_type != 2:
+              full_arc_on_proportion_thread_id = start_thread(full_arc_on_proportion,(MAGParameters[process].welding_current,MAGParameters[process].welding_voltage,MAGParameters[process].time_of_transition_c,MAGParameters[process].time_of_transition_c,process))
+  end
+  def full_arc_off():
+      global full_arc_alarm_thread_id
+      global full_arc_on_proportion_thread_id
+      global full_process
+      global full_sim_mode
+      process = full_process
+      if full_arc_alarm_thread_id != 0:
+          stop_thread(full_arc_alarm_thread_id)
+          full_arc_alarm_thread_id = 0
+      if full_arc_on_proportion_thread_id != 0:
+          stop_thread(full_arc_on_proportion_thread_id)
+          full_arc_on_proportion_thread_id = 0
+      if (MAGParameters[process].work_type != 2):
+          arc_closing_current = MAGParameters[process].welding_current *(MAGParameters[process].arc_closing_current/100.0)
+          arc_closing_voltage = MAGParameters[process].arc_closing_voltage
+          full_arc_on_proportion(arc_closing_current,arc_closing_voltage,MAGParameters[process].time_of_transition_e,MAGParameters[process].arc_closing_time,process)
+          if MAGParameters[process].time_of_transition_e <= 0:
+              sleep(MAGParameters[process].arc_closing_time)
+          aotai_mode_set(process,False)
+      else:
+          aotai_mode_set(process,False)
+          sleep(MAGParameters[process].arc_closing_time_job)
+  
+      t2 = 0
+      welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+      while welding_state[0] == 1 :
+          welding_state = integer_to_binary_list(modbus_get_signal_status("AOTAI1000"))
+          sleep(0.1)
+          t2 = t2 + 0.1
+          if t2 >= 2 :
+              full_alarm_cb()
+              popup(s="错误编号006：灭弧超时，请立即关闭焊接电源，排查原因！", error=True,title="焊接报警", blocking=False)
+              pause()
+      end
+      if full_sim_mode == False:
+          modbus_set_output_register("AOTAI2001",1)
+      sleep(MAGParameters[process].delayed_supply_job if MAGParameters[process].work_type == 2 else MAGParameters[process].delayed_supply)
+      modbus_set_output_register("AOTAI2001",0)
+  end
+  def full_sim_mode_inspection():
+      global full_sim_mode
+      global full_process
+      global inWeldingPath
+      last_sim_mode = full_sim_mode
+      while True:
+          if full_sim_mode == last_sim_mode:
+              sleep(0.5)
+          elif full_sim_mode == False  and inWeldingPath == True:
+              full_arc_on(full_process)
+              last_sim_mode = full_sim_mode
+          elif inWeldingPath == True:
+              full_arc_off()
+              last_sim_mode = full_sim_mode
+      end
+  end
+  global full_err_id
+  full_err_id = 0
+  def full_err():
+     while True:
+        sync()
+     end
+  end
+  full_err_id = start_thread(full_err, ())
+  #--------------- End WeldingDevice -----------------
+  #--------------- Start FullWeldingFunction -----------------
+  class MAGParameterSet:
+    def __init__(self, process,
+      work_type, expert_number, job_number, advance_air_supply, arc_starting_current,
+      arc_starting_voltage, arc_start_time, time_of_transition_c, welding_current, welding_voltage,
+      correction_of_inductance, speed_of_welding, backoff_distance_d, time_of_transition_e, arc_closing_current,
+      arc_closing_voltage, arc_closing_time, welding_wire_reburning, delayed_supply, advance_air_supply_job,
+      arc_start_time_job, speed_of_welding_job,backoff_distance_job, arc_closing_time_job, delayed_supply_job):
+      self.process = process
+      self.work_type = work_type
+      self.expert_number = expert_number
+      self.job_number = job_number
+      self.advance_air_supply = advance_air_supply
+      self.arc_starting_current = arc_starting_current
+      self.arc_starting_voltage = arc_starting_voltage
+      self.arc_start_time = arc_start_time
+      self.time_of_transition_c = time_of_transition_c
+      self.welding_current = welding_current
+      self.welding_voltage = welding_voltage
+      self.correction_of_inductance = correction_of_inductance
+      self.speed_of_welding = speed_of_welding
+      self.backoff_distance_d = backoff_distance_d
+      self.time_of_transition_e = time_of_transition_e
+      self.arc_closing_current = arc_closing_current
+      self.arc_closing_voltage = arc_closing_voltage
+      self.arc_closing_time = arc_closing_time
+      self.welding_wire_reburning = welding_wire_reburning
+      self.delayed_supply = delayed_supply
+      self.advance_air_supply_job = advance_air_supply_job
+      self.arc_start_time_job = arc_start_time_job
+      self.speed_of_welding_job = speed_of_welding_job
+      self.backoff_distance_job = backoff_distance_job
+      self.arc_closing_time_job = arc_closing_time_job
+      self.delayed_supply_job = delayed_supply_job
+  MAGParameters = [
+      MAGParameterSet(0,3,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(1,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(2,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(3,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(4,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(5,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(6,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(7,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(8,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(9,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(10,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(11,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(12,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(13,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(14,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(15,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(16,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(17,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(18,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(19,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(20,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(21,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(22,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(23,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(24,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(25,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(26,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(27,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(28,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+      MAGParameterSet(29,0,1,1,0.5,105,0.0,0.5,0.5,0,0.0,0,6.0,5,0.5,60,0.0,0.5,0,0.5,0.5,0.5,6,5,1.5,0.5),
+  ]
+  # Set Node Preamble Script.
+  # Loop Node Preamble Script.
+  # Waypoint Node Preamble Script.
+  global u36335u28857_1_p
+  u36335u28857_1_p = [0.09200000020725702, -0.14749999998113048, 1.076499999962261, -1.5707963272051035, 8.413483277748711E-20, -1.5707963265897933]
+  global u36335u28857_1_q
+  u36335u28857_1_q = [0.0,-1.570796327,0.0,-1.570796327,1.570796327,0.0]
+  # Initial Variables value.
+  # Timer Node Preamble Script.
+  # SubTask Node Preamble Script.
+  # Before Start Preamble Script.
+  # Thread Node Preamble Script.
+  # Event Node Preamble Script.
+  # Main Task Script.
+  while (True):
+    $ LINE: (2, "机器人主任务")
+    $ LINE: (3, "MoveJ")
+    $ LINE: (4, "路点_1", "after")
+    movej(get_inverse_kin(u36335u28857_1_p, qnear=u36335u28857_1_q), a=1.3962634015954636, v=1.0471975511965976)
+  end
+end

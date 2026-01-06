@@ -1,0 +1,451 @@
+def test1():
+  # Preamble Script.
+  # Test Preamble Script To Be Added In The Future.
+  set_safety_mode_transition_hardness(1)
+  # Configuration Preamble Script.
+  # Configuration variables.
+  set_tool_analog_io_work_mode(0)
+  set_tool_digital_io_work_mode(0)
+  set_tool_analog_input_domain(1)
+  set_tool_analog_output_domain(1)
+  set_tool_digital_io_config(0,2,True,True)
+  set_tool_digital_io_config(1,2,True,True)
+  set_tool_digital_io_config(2,0,True,False)
+  set_tool_digital_io_config(3,0,True,False)
+  tool_serial_config(True,115200,0,1,modbus_rtu = True,usage = 1)
+  set_tool_voltage(24)
+  set_tcp([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  set_payload(0.0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+  set_standard_analog_input_domain(0, 1)
+  set_standard_analog_input_domain(1, 1)
+  set_standard_analog_output_domain(0, 1)
+  set_standard_analog_output_domain(1, 1)
+  set_input_actions_to_default()
+  set_gravity([0.0, 0.0, 9.82])
+  # Frame variables.
+  global u22352u26631u31995
+  u22352u26631u31995 = [0.005, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # Temporary frame variables.
+  # Conveyor Config
+  #--------------- Start WeldingTools -----------------
+  global firstArc
+  firstArc = 0
+  global recordCurrent
+  recordCurrent = float('-inf')
+  global recordVoltage
+  recordVoltage = float('-inf')
+  def weldingIndicator(b):
+      set_standard_digital_out(-1,b)
+  end
+  def repeatable(i):
+     global firstArc
+     if firstArc>>i & 1 == 1:
+         halt()
+     else:
+         firstArc |= (1<<i)
+  end
+  def touchSenseOffset(org,dir1,dir2,length):
+     pose = elicopy.deepcopy(org)
+     pose_diff = [0,0,0]
+     pose_diff[0] = dir2[0] - dir1[0]
+     pose_diff[1] = dir2[1] - dir1[1]
+     pose_diff[2] = dir2[2] - dir1[2]
+     pose_diff = normalize(pose_diff)
+     pose[0] = pose[0] + pose_diff[0] * length
+     pose[1] = pose[1] + pose_diff[1] * length
+     pose[2] = pose[2] + pose_diff[2] * length
+     return pose
+  end
+  global touchSenseOffsetValue
+  touchSenseOffsetValue = [0,0,0,0,0,0]
+  global touchReferencePoint
+  touchReferencePoint = [0,0,0,0,0,0]
+  def pose_trans_local(world_pnt,frame):
+    return pose_trans(pose_inv(frame),world_pnt)
+  end
+  def pose_trans_world(local_pnt,frame):
+    return pose_trans(frame,local_pnt)
+  end
+  def two_point_get_vec(vec1,vec2):
+    result=[0,0,0]
+    result[0]=vec2[0]-vec1[0]
+    result[1]=vec2[1]-vec1[1]
+    result[2]=vec2[2]-vec1[2]
+    return result
+  end
+  def vector_o_product(vec1,vec2):
+    return vec1[0]*vec2[0]+vec1[1]*vec2[1]+vec1[2]*vec2[2]
+  end
+  def vector_v_product(vec1,vec2):
+    res_vec=[0,0,0]
+    res_vec[0]=vec1[1]*vec2[2]-vec1[2]*vec2[1]
+    res_vec[1]=vec1[2]*vec2[0]-vec1[0]*vec2[2]
+    res_vec[2]=vec1[0]*vec2[1]-vec1[1]*vec2[0]
+    return res_vec
+  end
+  def get_vertical_vec_by_three_point(pnt1,pnt2,vec_pnt):
+    vec1=[0,0,0]
+    vec1[0]=pnt2[0]-pnt1[0]
+    vec1[1]=pnt2[1]-pnt1[1]
+    vec1[2]=pnt2[2]-pnt1[2]
+    vec1=normalize(vec1)
+    vec2=[0,0,0]
+    vec2[0]=vec_pnt[0]-((pnt1[0]+pnt2[0])/2.0)
+    vec2[1]=vec_pnt[1]-((pnt1[1]+pnt2[1])/2.0)
+    vec2[2]=vec_pnt[2]-((pnt1[2]+pnt2[2])/2.0)
+    vec2=normalize(vec2)
+    ver_vec=vector_v_product(vec1,vec2)
+    return ver_vec
+  end
+  def two_point_touch_offset(pnt1,pnt2,vec_pnt,touch1,touch2,frame):
+    final_change=[0,0,0,0,0,0]
+    pnt1_local=pose_trans_local(pnt1,frame)
+    pnt2_local=pose_trans_local(pnt2,frame)
+    vec_pnt_local=pose_trans_local(vec_pnt,frame)
+    touch1_local=pose_trans_local(touch1,frame)
+    touch2_local=pose_trans_local(touch2,frame)
+    ver_vec=get_vertical_vec_by_three_point(pnt1_local,pnt2_local,vec_pnt_local)
+    if abs(norm(ver_vec))<0.0001:
+      return final_change
+    end
+    if (abs(ver_vec[0])>abs(ver_vec[1]))&(abs(ver_vec[0])>abs(ver_vec[2])):
+      pnt1_local[0]=0
+      pnt2_local[0]=0
+      touch1_local[0]=0
+      touch2_local[0]=0
+    elif (abs(ver_vec[1])>abs(ver_vec[0]))&(abs(ver_vec[1])>abs(ver_vec[2])):
+      pnt1_local[1]=0
+      pnt2_local[1]=0
+      touch1_local[1]=0
+      touch2_local[1]=0
+    elif (abs(ver_vec[2])>abs(ver_vec[0]))&(abs(ver_vec[2])>abs(ver_vec[1])):
+      pnt1_local[2]=0
+      pnt2_local[2]=0
+      touch1_local[2]=0
+      touch2_local[2]=0
+    else:
+      return final_change
+    end
+    final_change[0]=touch1_local[0]-pnt1_local[0]
+    final_change[1]=touch1_local[1]-pnt1_local[1]
+    final_change[2]=touch1_local[2]-pnt1_local[2]
+    new_vec1=two_point_get_vec(pnt1_local,pnt2_local)
+    new_vec1=normalize(new_vec1)
+    if abs(norm(new_vec1))<0.0001:
+      return final_change
+    end
+    new_vec2=two_point_get_vec(touch1_local,touch2_local)
+    new_vec2=normalize(new_vec2)
+    if abs(norm(new_vec2))<0.0001:
+      return final_change
+    end
+    angle=vector_o_product(new_vec1,new_vec2)/(norm(new_vec1)*norm(new_vec2))
+    if angle>1.0:
+      angle=1.0
+    end
+    if angle<-1.0:
+      angle=-1.0
+    end
+    angle=acos(angle)
+    if abs(angle)<0.0001:
+      return final_change
+    end
+    judge_vec=vector_v_product(new_vec1,new_vec2)
+    if abs(norm(judge_vec))<0.0001:
+      return final_change
+    end
+    judge_vec=normalize(judge_vec)
+    if abs(judge_vec[0])>0.9999:
+      if judge_vec[0]>0:
+        final_change[3]=angle
+      else:
+        final_change[3]=-angle
+      end
+      return final_change
+    end
+    if abs(judge_vec[1])>0.9999:
+      if judge_vec[1]>0:
+        final_change[4]=angle
+      else:
+        final_change[4]=-angle
+      end
+      return final_change
+    end
+    if abs(judge_vec[2])>0.9999:
+      if judge_vec[2]>0:
+        final_change[5]=angle
+      else:
+        final_change[5]=-angle
+      end
+      return final_change
+    end
+    return final_change
+  end
+  def last_point_touch_offset(pnt1,pnt2,vec_pnt,touch1,touch2,pnt3,touch3,frame):
+    final_change=[0,0,0,0,0,0]
+    pnt3_local=pose_trans_local(pnt3,frame)
+    touch3_local=pose_trans_local(touch3,frame)
+    touch1_local=pose_trans_local(touch1,frame)
+    touch2_local=pose_trans_local(touch2,frame)
+    pnt1_local=pose_trans_local(pnt1,frame)
+    pnt2_local=pose_trans_local(pnt2,frame)
+    vec_pnt_local=pose_trans_local(vec_pnt,frame)
+    ver_vec=get_vertical_vec_by_three_point(pnt1_local,pnt2_local,vec_pnt_local)
+    if abs(norm(ver_vec))<0.0001:
+      return final_change
+    end
+    if (abs(ver_vec[0])>abs(ver_vec[1]))&(abs(ver_vec[0])>abs(ver_vec[2])):
+      pnt3_local[0]=0
+      touch3_local[0]=0
+      touch1_local[0]=0
+      touch2_local[0]=0
+    elif (abs(ver_vec[1])>abs(ver_vec[0]))&(abs(ver_vec[1])>abs(ver_vec[2])):
+      pnt3_local[1]=0
+      touch3_local[1]=0
+      touch1_local[1]=0
+      touch2_local[1]=0
+    elif (abs(ver_vec[2])>abs(ver_vec[0]))&(abs(ver_vec[2])>abs(ver_vec[1])):
+      pnt3_local[2]=0
+      touch3_local[2]=0
+      touch1_local[2]=0
+      touch2_local[2]=0
+    else:
+      return final_change
+    end
+    new_vec3=two_point_get_vec(pnt3_local,touch3_local)
+    if abs(norm(new_vec3))<0.0001:
+      return final_change
+    end
+    new_vec2=two_point_get_vec(touch1_local,touch2_local)
+    if abs(norm(new_vec2))<0.0001:
+      return final_change
+    end
+    new_vec2=normalize(new_vec2)
+    value=vector_o_product(new_vec2,new_vec3)
+    final_change[0]=new_vec2[0]*value
+    final_change[1]=new_vec2[1]*value
+    final_change[2]=new_vec2[2]*value
+    return final_change
+  end
+  def cal_new_orientation_point(pnt1,pnt2,pnt3,inner_pnt,vec_pnt):
+    new_vec_pnt=elicopy.deepcopy(vec_pnt)
+    first_vec=two_point_get_vec(pnt1,pnt2)
+    first_vec=normalize(first_vec)
+    if abs(norm(first_vec))<0.0001:
+        return new_vec_pnt
+    end
+    second_vec=two_point_get_vec(pnt1,pnt3)
+    second_vec=normalize(second_vec)
+    if abs(norm(second_vec))<0.0001:
+        return new_vec_pnt
+    end
+    vec_dir=vector_v_product(first_vec,second_vec)
+    vec_dir=normalize(vec_dir)
+    if abs(norm(vec_dir))<0.0001:
+     return new_vec_pnt
+    end
+    len=vector_o_product(vec_dir,two_point_get_vec(inner_pnt,vec_pnt))
+    new_vec_pnt[0]=inner_pnt[0]+vec_dir[0]*len
+    new_vec_pnt[1]=inner_pnt[1]+vec_dir[1]*len
+    new_vec_pnt[2]=inner_pnt[2]+vec_dir[2]*len
+    return new_vec_pnt
+  end
+  modbus_add_signal("192.168.1.2", 255, 0, 2, "MERKLE0")
+  modbus_set_signal_update_frequency("MERKLE0", 200)
+  modbus_add_signal("192.168.1.2", 255, 2, 0, "MERKLE2")
+  modbus_set_signal_update_frequency("MERKLE2", 200)
+  modbus_add_signal("192.168.1.2", 255, 3, 0, "MERKLE3")
+  modbus_set_signal_update_frequency("MERKLE3", 200)
+  modbus_add_signal("192.168.1.2", 255, 5, 0, "MERKLE5")
+  modbus_set_signal_update_frequency("MERKLE5", 200)
+  modbus_add_signal("192.168.1.2", 255, 7, 0, "MERKLE7")
+  modbus_set_signal_update_frequency("MERKLE7", 200)
+  modbus_add_signal("192.168.1.2", 255, 16423, 1, "MERKLE16423")
+  modbus_set_signal_update_frequency("MERKLE16423", 200)
+  modbus_add_signal("192.168.1.2", 255, 16430, 1, "MERKLE16430")
+  modbus_set_signal_update_frequency("MERKLE16430", 200)
+  modbus_add_signal("192.168.1.2", 255, 16421, 1, "MERKLE16421")
+  modbus_set_signal_update_frequency("MERKLE16421", 200)
+  modbus_add_signal("192.168.1.2", 255, 16426, 1, "MERKLE16426")
+  modbus_set_signal_update_frequency("MERKLE16426", 200)
+  modbus_add_signal("192.168.1.2", 255, 16425, 1, "MERKLE16425")
+  modbus_set_signal_update_frequency("MERKLE16425", 200)
+  modbus_add_signal("192.168.1.2", 255, 16424, 1, "MERKLE16424")
+  modbus_set_signal_update_frequency("MERKLE16424", 200)
+  modbus_add_signal("192.168.1.2", 255, 16420, 1, "MERKLE16420")
+  modbus_set_signal_update_frequency("MERKLE16420", 200)
+  modbus_add_signal("192.168.1.2", 255, 16431, 1, "MERKLE16431")
+  modbus_set_signal_update_frequency("MERKLE16431", 200)
+  modbus_add_signal("192.168.1.2", 255, 16418, 1, "MERKLE16418")
+  modbus_set_signal_update_frequency("MERKLE16418", 200)
+  modbus_add_signal("192.168.1.2", 255, 16422, 1, "MERKLE16422")
+  modbus_set_signal_update_frequency("MERKLE16422", 200)
+  modbus_add_signal("192.168.1.2", 255, 16417, 1, "MERKLE16417")
+  modbus_set_signal_update_frequency("MERKLE16417", 200)
+  modbus_add_signal("192.168.1.2", 255, 16429, 1, "MERKLE16429")
+  modbus_set_signal_update_frequency("MERKLE16429", 200)
+  modbus_add_signal("192.168.1.2", 255, 1027, 3, "MERKLE1027")
+  modbus_set_signal_update_frequency("MERKLE1027", 200)
+  def arc_set(JOB):
+    #机器人准备好,JOB模式
+    modbus_set_output_signal("MERKLE16421",True)
+    binJob = integer_to_binary_list(JOB)
+    Job = binary_list_to_integer([binJob[7],binJob[6],binJob[5],binJob[4],binJob[3],binJob[2],binJob[1],binJob[0],binJob[15],binJob[14],binJob[13],binJob[12],binJob[11],binJob[10],binJob[9],binJob[8]])
+    modbus_set_output_register("MERKLE1027",Job)
+  end
+  def alarm_cb():
+    #焊机故障复位
+    if (modbus_get_signal_status("MERKLE2")== False):
+      modbus_set_output_signal("MERKLE16429",True)
+      sleep(0.6)
+      modbus_set_output_signal("MERKLE16429",False)
+      sleep(0.6)
+    end
+  end
+  global arc_alarm_thread_id
+  arc_alarm_thread_id = 0
+  def alarm_di_check():
+    global arc_alarm_thread_id
+    alarm_time = 0
+    sleep_time = 0.1
+    while (True):
+      welding_state = integer_to_binary_list(modbus_get_signal_status("MERKLE0"))
+      if (welding_state[15] != 1 or welding_state[14] != 1 or welding_state[13] != 0 or welding_state[12] != 0 or welding_state[11] != 0):
+        alarm_time = alarm_time + sleep_time
+      else:
+        alarm_time = 0
+      end
+      if (alarm_time >= 0.5):
+        alarm_cb()
+        if (modbus_get_signal_status("MERKLE7")== False):
+          popup("电弧丢失超时时间", title="MERKLE - Error")
+          halt()
+        end
+        if (modbus_get_signal_status("MERKLE2")== False):
+          popup("焊机错误，未准备好焊机", title="MERKLE - Error")
+          halt()
+        end
+        welding_err_number = binary_list_to_integer([welding_state[15],welding_state[14],welding_state[13],welding_state[12],welding_state[11]])
+        if (welding_err_number == 1):
+          popup("主电源错误", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 2):
+          popup("过温", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 3):
+          popup("温度传感器错误", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 4):
+          popup("一般错误电源部分", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 5):
+          popup("水压错误", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 6):
+          popup("总线错误", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 7):
+          popup("紧急停止", title="MERKLE - Error")
+          halt()
+        end
+        if (welding_err_number == 8):
+          popup("特性曲线错误", title="MERKLE - Error")
+          halt()
+        end
+      end
+      sleep(sleep_time)
+      sync()
+    end
+  end
+  def arc_on_check():
+    global arc_alarm_thread_id
+    t1 = 0
+    while (True):
+      if (modbus_get_signal_status("MERKLE7")== True):
+        if (arc_alarm_thread_id == 0):
+          arc_alarm_thread_id = start_thread(alarm_di_check, ())
+          return True
+        end
+      elif (t1 >= 3.0):
+        return False
+      end
+      sleep(0.1)
+      t1 = t1 + 0.1
+    end
+  end
+  def MERKLE_WELD_ON():
+    global arc_alarm_thread_id
+    modbus_set_output_signal("MERKLE16430",True)
+    modbus_set_runstate_dependent_choice("MERKLE16423",1)
+    modbus_set_output_signal("MERKLE16429",True)
+    sleep(0.2)
+    modbus_set_output_signal("MERKLE16429",False)
+    modbus_set_runstate_dependent_choice("MERKLE1027",1)
+    modbus_set_runstate_dependent_choice("MERKLE16421",2)
+    if (modbus_get_signal_status("MERKLE7")== True):
+      return
+    end
+    if (arc_alarm_thread_id != 0):
+      stop_thread(arc_alarm_thread_id)
+      arc_alarm_thread_id = 0
+    end
+    n = 0
+    while (True):
+      modbus_set_output_signal("MERKLE16423",True)
+      if (arc_on_check() == True):
+        modbus_set_output_signal("MERKLE16423",True)
+        break
+      elif (n >= 0):
+        alarm_cb()
+        popup("起弧失败，未在规定时间内接收到起弧成功信号。", title="MERKLE - Error")
+        halt()
+      end
+      n = n + 1
+    end
+  end
+  def MERKLE_WELD_OFF():
+    global arc_alarm_thread_id
+    if (arc_alarm_thread_id != 0):
+      stop_thread(arc_alarm_thread_id)
+      arc_alarm_thread_id = 0
+    end
+    #灭弧
+    modbus_set_output_signal("MERKLE16423",False)
+    t1 = 0
+    while (True):
+      welding_state = integer_to_binary_list(modbus_get_signal_status("MERKLE0"))
+      if (modbus_get_signal_status("MERKLE7")== False):
+        break
+      elif (t1 >= 3.0):
+        alarm_cb()
+        popup("灭弧超时时间", title="MERKLE - Error")
+        halt()
+      end
+      sleep(0.1)
+      t1 = t1 + 0.1
+      sync()
+    end
+  end
+  #--------------- End WeldingTools -----------------
+  # Set Node Preamble Script.
+  # Loop Node Preamble Script.
+  # Waypoint Node Preamble Script.
+  # Initial Variables value.
+  # Timer Node Preamble Script.
+  # SubTask Node Preamble Script.
+  # Before Start Preamble Script.
+  # Thread Node Preamble Script.
+  # Event Node Preamble Script.
+  # Main Task Script.
+  while (True):
+    $ LINE: (2, "机器人主任务")
+    $ LINE: (3, "等待")
+    sleep(0.01)
+  end
+end
